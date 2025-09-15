@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Habit Tracker</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <header class="app-header">
+            <h1><i class="fas fa-check-circle"></i> Habit Tracker</h1>
+            <p>Build better habits, one day at a time</p>
+        </header>
+
+        <main class="main-content">
+            <section class="add-habit-section">
+                <h2>Add New Habit</h2>
+                <form id="habit-form" class="habit-form">
+                    <div class="form-group">
+                        <label for="habit-name">Habit Name</label>
+                        <input type="text" id="habit-name" placeholder="e.g., Drink water, Exercise, Read" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="frequency">Frequency</label>
+                        <select id="frequency" required>
+                            <option value="daily">Daily</option>
+                            <option value="weekly">Weekly</option>
+                            <option value="weekdays">Weekdays</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="goal">Goal</label>
+                        <input type="text" id="goal" placeholder="e.g., 8 glasses, 30 minutes, 20 pages" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Add Habit
+                    </button>
+                </form>
+            </section>
+
+            <section class="habits-section">
+                <h2>My Habits</h2>
+                <div class="habits-container" id="habits-container">
+                    <!-- Habits will be dynamically inserted here -->
+                    <div class="no-habits">
+                        <i class="fas fa-clipboard-list"></i>
+                        <p>No habits added yet. Start by adding your first habit!</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="stats-section">
+                <h2>Your Progress</h2>
+                <div class="stats-container">
+                    <div class="stat-card">
+                        <i class="fas fa-fire"></i>
+                        <h3>Current Streak</h3>
+                        <p id="current-streak">0 days</p>
+                    </div>
+                    <div class="stat-card">
+                        <i class="fas fa-calendar-check"></i>
+                        <h3>Habits Today</h3>
+                        <p id="habits-today">0/0</p>
+                    </div>
+                    <div class="stat-card">
+                        <i class="fas fa-trophy"></i>
+                        <h3>Completion Rate</h3>
+                        <p id="completion-rate">0%</p>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="progress-chart"></canvas>
+                </div>
+            </section>
+        </main>
+
+        <div class="modal" id="habit-modal">
+            <div class="modal-content">
+                <span class="close-modal">&times;</span>
+                <h2 id="modal-title">Log Habit</h2>
+                <form id="log-form">
+                    <input type="hidden" id="habit-id">
+                    <div class="form-group">
+                        <label>Did you complete this habit today?</label>
+                        <div class="toggle-container">
+                            <label class="switch">
+                                <input type="checkbox" id="completed">
+                                <span class="slider round"></span>
+                            </label>
+                            <span id="toggle-label">No</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="notes">Notes (optional)</label>
+                        <textarea id="notes" rows="3" placeholder="Add any notes about today's progress..."></textarea>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-secondary" id="cancel-log">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
