@@ -54,6 +54,11 @@
 
             <section class="stats-section">
                 <h2>Your Progress</h2>
+                <div class="test-controls" style="margin: 10px 0; display: flex; gap: 10px; align-items: center;">
+                    <label for="test-date" style="font-weight: 500;">Test Date:</label>
+                    <input type="date" id="test-date">
+                    <button type="button" id="reset-date" class="btn btn-secondary">Today</button>
+                </div>
                 <div class="stats-container">
                     <div class="stat-card">
                         <i class="fas fa-fire"></i>
@@ -104,7 +109,27 @@
                 </form>
             </div>
         </div>
+        <!-- Habit Details Modal -->
+        <div class="modal" id="habit-details-modal">
+            <div class="modal-content">
+                <span class="close-modal close-details-modal">&times;</span>
+                <h2 id="details-title">Habit Details</h2>
+                <div id="details-body">
+                    <div class="details-stats">
+                        <p><strong>Current Streak:</strong> <span id="details-streak">0</span></p>
+                        <p><strong>Completion Rate:</strong> <span id="details-completion">0%</span></p>
+                        <p><strong>Total Entries:</strong> <span id="details-total">0</span></p>
+                    </div>
+                    <div class="chart-container" style="height: 220px;">
+                        <canvas id="details-chart"></canvas>
+                    </div>
+                    <h3 style="margin-top: 16px;">Recent Logs</h3>
+                    <ul id="details-logs" class="details-logs"></ul>
+                </div>
+            </div>
+        </div>
     </div>
+
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="js/app.js"></script>

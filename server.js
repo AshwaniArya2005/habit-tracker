@@ -78,13 +78,50 @@ app.get('/api/habits', (req, res) => {
                (SELECT COUNT(*) FROM habit_logs WHERE habit_id = h.id) as total_entries
         FROM habits h
         ORDER BY h.created_at DESC`;
-    
-    db.all(query, [], (err, rows) => {
+
+    db.all(query, [], async (err, rows) => {
         if (err) {
             console.error('Error fetching habits:', err);
             return res.status(500).json({ error: 'Failed to fetch habits' });
         }
-        res.json(rows);
+
+        // Helper to promisify db.all
+        const dbAll = (sql, params = []) => new Promise((resolve, reject) => {
+            db.all(sql, params, (e, r) => (e ? reject(e) : resolve(r)));
+        });
+
+        try {
+            const habitsWithLogs = await Promise.all(rows.map(async (h) => {
+                // Fetch recent logs (last 90 days) and build date->entry map
+                const logs = await dbAll(
+                    `SELECT completed, notes, date(log_date) as log_date
+                     FROM habit_logs
+                     WHERE habit_id = ?
+                     ORDER BY date(log_date) ASC`,
+                    [h.id]
+                );
+                const logsMap = {};
+                let completedCount = 0;
+                logs.forEach(l => {
+                    logsMap[l.log_date] = { completed: !!l.completed, notes: l.notes || '' };
+                    if (l.completed) completedCount++;
+                });
+
+                const totalEntries = h.total_entries || logs.length;
+                const completionRate = totalEntries > 0 ? Math.round((completedCount / totalEntries) * 100) : 0;
+
+                return {
+                    ...h,
+                    logs: logsMap,
+                    completion_rate: completionRate
+                };
+            }));
+
+            res.json(habitsWithLogs);
+        } catch (e) {
+            console.error('Error enriching habits with logs:', e);
+            res.status(500).json({ error: 'Failed to assemble habits data' });
+        }
     });
 });
 
@@ -124,23 +161,39 @@ app.post('/api/habits', (req, res) => {
     );
 });
 
-app.put('/api/habits/:id/log', (req, res) => {
-    const { completed, notes } = req.body;
+// Delete a habit (and cascade deletes its logs via FK)
+app.delete('/api/habits/:id', (req, res) => {
     const habitId = req.params.id;
-    
-    // Check if log entry already exists for today
+    db.run('DELETE FROM habits WHERE id = ?', [habitId], function(err) {
+        if (err) {
+            console.error('Error deleting habit:', err);
+            return res.status(500).json({ error: 'Failed to delete habit' });
+        }
+        if (this.changes === 0) {
+            return res.status(404).json({ error: 'Habit not found' });
+        }
+        return res.status(204).send();
+    });
+});
+
+app.put('/api/habits/:id/log', (req, res) => {
+    const { completed, notes, date } = req.body;
+    const habitId = req.params.id;
+
+    // Allow client to specify log date; default to today
     const today = new Date().toISOString().split('T')[0];
-    
+    const logDate = date || today;
+
     db.get(
         'SELECT * FROM habit_logs WHERE habit_id = ? AND date(log_date) = ?',
-        [habitId, today],
+        [habitId, logDate],
         (err, row) => {
             if (err) {
                 console.error('Database error:', err);
                 return res.status(500).json({ error: 'Database error' });
             }
             
-            const logData = [completed, notes, habitId, today];
+            const logData = [completed, notes, habitId, logDate];
             
             if (row) {
                 // Update existing log
@@ -173,10 +226,11 @@ app.put('/api/habits/:id/log', (req, res) => {
     );
 });
 
-// Serve the main HTML file
-app.get('*', (req, res) => {
+// Serve index.html only for non-API routes
+app.get(/^\/(?!api).*/, (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
+
 
 // Start the server
 const server = app.listen(PORT, () => {

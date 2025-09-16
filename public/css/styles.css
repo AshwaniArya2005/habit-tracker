@@ -130,18 +130,25 @@ textarea {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 0.75rem 1.5rem;
+    padding: 0.6rem 1.1rem;
     border: none;
     border-radius: 5px;
     font-family: inherit;
-    font-size: 1rem;
+    font-size: 0.95rem;
     font-weight: 500;
     cursor: pointer;
     transition: var(--transition);
 }
 
 .btn i {
-    margin-right: 0.5rem;
+    margin-right: 0.45rem;
+}
+
+/* Small buttons */
+.btn-sm {
+    padding: 0.45rem 0.85rem;
+    font-size: 0.875rem;
+    border-radius: 6px;
 }
 
 .btn-primary {
@@ -222,6 +229,31 @@ textarea {
     color: var(--secondary-color);
 }
 
+/* Status chip next to frequency */
+.habit-status {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-left: 0.4rem;
+}
+
+.habit-status.status-pending {
+    background: #fff3cd; /* light amber */
+    color: #8a6d3b;
+}
+
+.habit-status.status-completed {
+    background: #d4edda; /* light green */
+    color: #155724;
+}
+
+.habit-status.status-missed {
+    background: #f8d7da; /* light red */
+    color: #721c24;
+}
+
 .habit-goal {
     color: var(--secondary-color);
     margin-bottom: 1.5rem;
@@ -254,8 +286,13 @@ textarea {
 }
 
 .habit-actions {
-    display: flex;
-    gap: 0.5rem;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.6rem;
+}
+
+.habit-actions .btn {
+    width: 100%;
 }
 
 /* Stats Section */

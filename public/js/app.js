@@ -12,43 +12,210 @@ const toggleLabel = document.getElementById('toggle-label');
 let habits = [];
 let currentHabitId = null;
 let progressChart = null;
+let selectedDate = null; // YYYY-MM-DD used for testing UI state
+let detailsChart = null; // chart instance for details modal
+
+// API base URL (use absolute URL to avoid dev-server/static-server mismatches)
+const API_BASE = window.API_BASE || 'http://localhost:3000';
 
 // Event Listeners
 document.addEventListener('DOMContentLoaded', () => {
+    // Initialize selectedDate to today and set the test date control default if present
+    const todayStr = new Date().toISOString().split('T')[0];
+    selectedDate = todayStr;
+    const testDateInput = document.getElementById('test-date');
+    if (testDateInput) {
+        testDateInput.value = todayStr;
+    }
+
+    setupChart();       // Setup chart first to avoid race condition
     fetchHabits();
     setupEventListeners();
-    setupChart();
 });
 
 // Setup event listeners
 function setupEventListeners() {
-    // Add habit form submission
     habitForm.addEventListener('submit', handleAddHabit);
-    
-    // Log form submission
     logForm.addEventListener('submit', handleLogHabit);
-    
-    // Toggle switch for completion status
+
     completedToggle.addEventListener('change', (e) => {
         toggleLabel.textContent = e.target.checked ? 'Yes' : 'No';
     });
-    
-    // Modal close buttons
+
     closeModal.addEventListener('click', () => modal.classList.remove('show'));
     cancelLog.addEventListener('click', () => modal.classList.remove('show'));
-    
-    // Close modal when clicking outside
+
     window.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            modal.classList.remove('show');
+        if (e.target === modal) modal.classList.remove('show');
+        const detailsModal = document.getElementById('habit-details-modal');
+        if (e.target === detailsModal) detailsModal.classList.remove('show');
+    });
+
+    // Close details modal button
+    const closeDetails = document.querySelector('.close-details-modal');
+    if (closeDetails) {
+        closeDetails.addEventListener('click', () => {
+            const detailsModal = document.getElementById('habit-details-modal');
+            if (detailsModal) detailsModal.classList.remove('show');
+        });
+    }
+
+    // Test date controls for UI testing
+    const testDateInput = document.getElementById('test-date');
+    const resetDateBtn = document.getElementById('reset-date');
+    if (testDateInput) {
+        testDateInput.addEventListener('change', (e) => {
+            const val = e.target.value;
+            if (val) {
+                selectedDate = val;
+            } else {
+                selectedDate = new Date().toISOString().split('T')[0];
+            }
+            renderHabits();
+            updateStats();
+        });
+    }
+    if (resetDateBtn) {
+        resetDateBtn.addEventListener('click', () => {
+            const todayStr = new Date().toISOString().split('T')[0];
+            selectedDate = todayStr;
+            const input = document.getElementById('test-date');
+            if (input) input.value = todayStr;
+            renderHabits();
+            updateStats();
+        });
+    }
+}
+
+// Delete a habit
+async function handleDeleteHabit(habitId) {
+    const habit = habits.find(h => h.id === habitId);
+    if (!habit) return;
+
+    const confirmed = confirm(`Delete habit "${habit.name}"? This cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+        const response = await fetch(`${API_BASE}/api/habits/${habitId}`, { method: 'DELETE' });
+        if (!response.ok) {
+            const raw = await response.text();
+            try {
+                const err = JSON.parse(raw);
+                throw new Error(err.error || err.message || `HTTP ${response.status}`);
+            } catch (_) {
+                throw new Error(raw.slice(0, 200));
+            }
+        }
+        // Update local state
+        habits = habits.filter(h => h.id !== habitId);
+        renderHabits();
+        updateStats();
+        showNotification('Habit deleted.', 'success');
+    } catch (error) {
+        console.error('Error deleting habit:', error);
+        showNotification(error.message || 'Failed to delete habit', 'error');
+    }
+}
+
+// Open Details modal and populate content
+function openDetailsModal(habitId) {
+    const habit = habits.find(h => h.id === habitId);
+    if (!habit) return;
+
+    const detailsModal = document.getElementById('habit-details-modal');
+    const titleEl = document.getElementById('details-title');
+    const streakEl = document.getElementById('details-streak');
+    const completionEl = document.getElementById('details-completion');
+    const totalEl = document.getElementById('details-total');
+    const logsList = document.getElementById('details-logs');
+
+    titleEl.textContent = `Habit Details: ${habit.name}`;
+    streakEl.textContent = habit.current_streak || 0;
+    completionEl.textContent = `${habit.completion_rate || 0}%`;
+    totalEl.textContent = habit.total_entries || 0;
+
+    // Populate recent logs (latest 14 days)
+    const logs = habit.logs || {}; // { 'YYYY-MM-DD': { completed, notes } }
+    const dates = Object.keys(logs).sort().slice(-14).reverse();
+    logsList.innerHTML = dates.length === 0
+        ? '<li>No logs yet.</li>'
+        : dates.map(d => {
+            const entry = logs[d];
+            const status = entry.completed ? '✅ Completed' : '❌ Missed';
+            const note = entry.notes ? ` — ${entry.notes}` : '';
+            return `<li><strong>${d}:</strong> ${status}${note}</li>`;
+        }).join('');
+
+    // Mini chart for last 14 days (1/0)
+    const allDates = getLastNDates(14);
+    const chartLabels = allDates;
+    const chartData = allDates.map(d => (logs[d] ? (logs[d].completed ? 1 : 0) : 0));
+
+    const canvas = document.getElementById('details-chart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (detailsChart) {
+        detailsChart.destroy();
+    }
+    detailsChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: chartLabels,
+            datasets: [{
+                label: 'Completed (1 = yes, 0 = no) — last 14 days',
+                data: chartData,
+                backgroundColor: 'rgba(99, 197, 132, 0.7)',
+                borderColor: 'rgba(99, 197, 132, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: { beginAtZero: true, max: 1, ticks: { stepSize: 1 } },
+                x: { ticks: { autoSkip: true, maxTicksLimit: 7 } }
+            },
+            plugins: { legend: { display: false } }
         }
     });
+
+    detailsModal.classList.add('show');
+}
+
+function getLastNDates(n) {
+    const res = [];
+    const today = new Date(selectedDate || new Date().toISOString().split('T')[0]);
+    for (let i = n - 1; i >= 0; i--) {
+        const d = new Date(today);
+        d.setDate(today.getDate() - i);
+        res.push(d.toISOString().split('T')[0]);
+    }
+    return res;
 }
 
 // Fetch all habits from the server
 async function fetchHabits() {
     try {
-        const response = await fetch('/api/habits');
+        const response = await fetch(`${API_BASE}/api/habits`);
+        const contentType = response.headers.get('content-type') || '';
+
+        if (!response.ok) {
+            // Try to extract JSON error, otherwise text
+            const raw = await response.text();
+            try {
+                const errJson = JSON.parse(raw);
+                throw new Error(errJson.error || errJson.message || `HTTP ${response.status}`);
+            } catch (_) {
+                throw new Error(raw.slice(0, 200));
+            }
+        }
+
+        if (!contentType.includes('application/json')) {
+            const text = await response.text();
+            throw new Error(`Expected JSON but received: ${text.slice(0, 120)}`);
+        }
+
         habits = await response.json();
         renderHabits();
         updateStats();
@@ -69,21 +236,21 @@ function renderHabits() {
         `;
         return;
     }
-    
-    const today = new Date().toISOString().split('T')[0];
-    
+
     habitsContainer.innerHTML = habits.map(habit => {
-        const completionStatus = habit.logs && habit.logs[today] ? 
-            `<span class="badge ${habit.logs[today].completed ? 'completed' : 'missed'}">
-                ${habit.logs[today].completed ? 'Completed' : 'Missed'}
-            </span>` : 
-            '<span class="badge pending">Pending</span>';
-            
+        const logForDay = habit.logs && habit.logs[selectedDate];
+        const isCompleted = logForDay ? !!logForDay.completed : null;
+        const statusLabel = isCompleted === true ? 'Completed' : (isCompleted === false ? 'Missed' : 'Pending');
+        const statusClass = isCompleted === true ? 'status-completed' : (isCompleted === false ? 'status-missed' : 'status-pending');
+
         return `
             <div class="habit-card" data-id="${habit.id}">
                 <div class="habit-header">
                     <h3 class="habit-title">${habit.name}</h3>
-                    <span class="habit-frequency">${formatFrequency(habit.frequency)}</span>
+                    <div>
+                        <span class="habit-frequency">${formatFrequency(habit.frequency)}</span>
+                        <span class="habit-status ${statusClass}">${statusLabel}</span>
+                    </div>
                 </div>
                 <p class="habit-goal">Goal: ${habit.goal}</p>
                 <div class="habit-stats">
@@ -101,35 +268,39 @@ function renderHabits() {
                     </div>
                 </div>
                 <div class="habit-actions">
-                    <button class="btn btn-primary log-habit" data-id="${habit.id}">
+                    <button class="btn btn-primary btn-sm log-habit" data-id="${habit.id}">
                         <i class="fas fa-plus"></i> Log Today
                     </button>
-                    <button class="btn btn-secondary view-details" data-id="${habit.id}">
+                    <button class="btn btn-secondary btn-sm view-details" data-id="${habit.id}">
                         <i class="fas fa-chart-line"></i> Details
                     </button>
-                </div>
-                <div class="completion-status">
-                    ${completionStatus}
+                    <button class="btn btn-danger btn-sm delete-habit" data-id="${habit.id}">
+                        <i class="fas fa-trash"></i> Delete
+                    </button>
                 </div>
             </div>
         `;
     }).join('');
-    
-    // Add event listeners to the new buttons
+
     document.querySelectorAll('.log-habit').forEach(button => {
         button.addEventListener('click', (e) => {
             e.stopPropagation();
-            const habitId = parseInt(button.dataset.id);
-            openLogModal(habitId);
+            openLogModal(parseInt(button.dataset.id));
         });
     });
-    
+
     document.querySelectorAll('.view-details').forEach(button => {
         button.addEventListener('click', (e) => {
             e.stopPropagation();
-            const habitId = parseInt(button.dataset.id);
-            // In a real app, this would navigate to a details page
-            showNotification('Feature coming soon!', 'info');
+            openDetailsModal(parseInt(button.dataset.id));
+        });
+    });
+
+    document.querySelectorAll('.delete-habit').forEach(button => {
+        button.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const id = parseInt(button.dataset.id);
+            await handleDeleteHabit(id);
         });
     });
 }
@@ -137,114 +308,118 @@ function renderHabits() {
 // Handle adding a new habit
 async function handleAddHabit(e) {
     e.preventDefault();
-    
+
     const formData = {
         name: document.getElementById('habit-name').value.trim(),
         frequency: document.getElementById('frequency').value,
         goal: document.getElementById('goal').value.trim()
     };
-    
-    console.log('Submitting habit:', formData);
-    
+
     if (!formData.name || !formData.goal) {
         showNotification('Please fill in all fields', 'error');
         return;
     }
-    
+
     try {
-        console.log('Sending request to /api/habits');
-        const response = await fetch('/api/habits', {
+        const response = await fetch(`${API_BASE}/api/habits`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(formData)
         });
-        
-        console.log('Received response status:', response.status);
-        
-        let result;
-        try {
-            result = await response.json();
-            console.log('Response data:', result);
-        } catch (jsonError) {
-            console.error('Failed to parse JSON response:', jsonError);
-            throw new Error('Invalid response from server');
-        }
-        
+
+        const contentType = response.headers.get('content-type') || '';
         if (!response.ok) {
-            console.error('Server error:', result);
-            throw new Error(result.error || `Server responded with status ${response.status}`);
+            const raw = await response.text();
+            try {
+                const errJson = JSON.parse(raw);
+                throw new Error(errJson.error || errJson.message || `HTTP ${response.status}`);
+            } catch (_) {
+                throw new Error(raw.slice(0, 200));
+            }
         }
-        
-        console.log('Habit added successfully:', result);
-        
-        // Reset form and refresh the list
+        if (!contentType.includes('application/json')) {
+            const text = await response.text();
+            throw new Error(`Expected JSON but received: ${text.slice(0, 120)}`);
+        }
+
+        const newHabit = await response.json();
         habitForm.reset();
-        await fetchHabits();
+        habits = [newHabit, ...habits];
+        renderHabits();
+        updateStats();
+
         showNotification('Habit added successfully!', 'success');
     } catch (error) {
-        console.error('Error adding habit:', {
-            error: error.message,
-            stack: error.stack,
-            name: error.name
-        });
-        showNotification(`Error: ${error.message}`, 'error');
+        console.error('Error adding habit:', error);
+        showNotification(error.message || 'Failed to add habit', 'error');
     }
 }
 
-// Open the log modal for a specific habit
+// Open the log modal
 function openLogModal(habitId) {
     const habit = habits.find(h => h.id === habitId);
     if (!habit) return;
-    
+
     currentHabitId = habitId;
     document.getElementById('modal-title').textContent = `Log: ${habit.name}`;
     document.getElementById('habit-id').value = habitId;
-    
-    // Reset form
+
     completedToggle.checked = false;
     toggleLabel.textContent = 'No';
     document.getElementById('notes').value = '';
-    
-    // Show the modal
+
     modal.classList.add('show');
 }
 
 // Handle logging a habit
 async function handleLogHabit(e) {
     e.preventDefault();
-    
+
     const formData = {
         completed: completedToggle.checked,
-        notes: document.getElementById('notes').value.trim()
+        notes: document.getElementById('notes').value.trim(),
+        date: selectedDate
     };
-    
+
     try {
-        const response = await fetch(`/api/habits/${currentHabitId}/log`, {
+        const response = await fetch(`${API_BASE}/api/habits/${currentHabitId}/log`, {
             method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(formData)
         });
-        
+
+        const contentType = response.headers.get('content-type') || '';
         if (!response.ok) {
-            throw new Error('Failed to log habit');
+            const raw = await response.text();
+            try {
+                const errJson = JSON.parse(raw);
+                throw new Error(errJson.message || errJson.error || `HTTP ${response.status}`);
+            } catch (_) {
+                throw new Error(raw.slice(0, 200));
+            }
         }
-        
-        // Close modal and refresh the list
+        if (!contentType.includes('application/json')) {
+            // Some endpoints may return only a message; still handle text gracefully
+            // But our server returns JSON; surface a helpful error if not
+            const text = await response.text();
+            // Allow simple success message text as OK fallback
+            if (text && text.toLowerCase().includes('success')) {
+                // proceed as success
+            } else {
+                throw new Error(`Expected JSON but received: ${text.slice(0, 120)}`);
+            }
+        }
+
         modal.classList.remove('show');
         await fetchHabits();
         showNotification('Habit logged successfully!', 'success');
     } catch (error) {
         console.error('Error logging habit:', error);
-        showNotification('Failed to log habit. Please try again.', 'error');
+        showNotification(error.message || 'Failed to log habit', 'error');
     }
 }
 
-// Update the stats section
+// Update stats
 function updateStats() {
     if (habits.length === 0) {
         document.getElementById('current-streak').textContent = '0 days';
@@ -253,108 +428,75 @@ function updateStats() {
         updateChart([], []);
         return;
     }
-    
-    // Calculate current streak (longest streak from all habits)
-    const currentStreak = habits.reduce((max, habit) => 
+
+    const completedToday = habits.filter(h => h.logs && h.logs[selectedDate] && h.logs[selectedDate].completed).length;
+
+    const currentStreak = habits.reduce((max, habit) =>
         Math.max(max, habit.current_streak || 0), 0);
-    
-    // Calculate completion rate (average of all habits)
-    const totalCompletion = habits.reduce((sum, habit) => 
+
+    const totalCompletion = habits.reduce((sum, habit) =>
         sum + (parseInt(habit.completion_rate) || 0), 0);
     const avgCompletion = Math.round(totalCompletion / habits.length);
-    
-    // Update the UI
+
     document.getElementById('current-streak').textContent = `${currentStreak} day${currentStreak !== 1 ? 's' : ''}`;
     document.getElementById('completion-rate').textContent = `${avgCompletion}%`;
-    
-    // Update the chart
+    document.getElementById('habits-today').textContent = `${completedToday}/${habits.length}`;
+
     updateChart(
         habits.map(habit => habit.name),
         habits.map(habit => habit.completion_rate || 0)
     );
 }
 
-// Setup the chart
+// Chart setup
 function setupChart() {
     const ctx = document.getElementById('progress-chart').getContext('2d');
     progressChart = new Chart(ctx, {
         type: 'bar',
-        data: {
-            labels: [],
-            datasets: [{
-                label: 'Completion Rate %',
-                data: [],
-                backgroundColor: 'rgba(74, 111, 165, 0.7)',
-                borderColor: 'rgba(74, 111, 165, 1)',
-                borderWidth: 1
-            }]
-        },
+        data: { labels: [], datasets: [{ label: 'Completion Rate %', data: [], backgroundColor: 'rgba(74,111,165,0.7)', borderColor: 'rgba(74,111,165,1)', borderWidth: 1 }] },
         options: {
             responsive: true,
             maintainAspectRatio: false,
             scales: {
-                y: {
-                    beginAtZero: true,
-                    max: 100,
-                    title: {
-                        display: true,
-                        text: 'Completion Rate (%)'
-                    }
-                },
-                x: {
-                    title: {
-                        display: true,
-                        text: 'Habits'
-                    }
-                }
+                y: { beginAtZero: true, max: 100, title: { display: true, text: 'Completion Rate (%)' } },
+                x: { title: { display: true, text: 'Habits' } }
             },
-            plugins: {
-                legend: {
-                    display: false
-                }
-            }
+            plugins: { legend: { display: false } }
         }
     });
 }
 
-// Update the chart with new data
+// Update chart
 function updateChart(labels, data) {
     if (!progressChart) return;
-    
     progressChart.data.labels = labels;
     progressChart.data.datasets[0].data = data;
     progressChart.update();
 }
 
-// Helper function to format frequency
+// Format frequency
 function formatFrequency(frequency) {
-    const frequencyMap = {
-        'daily': 'Daily',
-        'weekly': 'Weekly',
-        'weekdays': 'Weekdays',
-        'weekends': 'Weekends'
-    };
-    
+    const frequencyMap = { 'daily': 'Daily', 'weekly': 'Weekly', 'weekdays': 'Weekdays', 'weekends': 'Weekends' };
     return frequencyMap[frequency] || frequency;
 }
 
-// Show a notification
+// Notifications
 function showNotification(message, type = 'info') {
-    // In a real app, you might use a more sophisticated notification system
     const notification = document.createElement('div');
     notification.className = `notification ${type}`;
     notification.textContent = message;
-    
+
     document.body.appendChild(notification);
-    
-    // Auto-remove after 3 seconds
+
+    // Trigger slide-in
+    requestAnimationFrame(() => notification.classList.add('show'));
+
     setTimeout(() => {
         notification.classList.add('fade-out');
         setTimeout(() => notification.remove(), 300);
     }, 3000);
 }
 
-// Add some basic styles for notifications
 const notificationStyles = document.createElement('style');
 notificationStyles.textContent = `
     .notification {
@@ -365,43 +507,23 @@ notificationStyles.textContent = `
         border-radius: 5px;
         color: white;
         font-weight: 500;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         z-index: 1000;
         transform: translateX(120%);
-        transition: transform 0.3s ease-in-out;
+        transition: transform 0.3s ease-in-out, opacity 0.3s ease-in-out;
     }
-    
-    .notification.show {
-        transform: translateX(0);
-    }
-    
-    .notification.fade-out {
-        opacity: 0;
-        transition: opacity 0.3s ease-in-out;
-    }
-    
-    .notification.success {
-        background-color: #28a745;
-    }
-    
-    .notification.error {
-        background-color: #dc3545;
-    }
-    
-    .notification.info {
-        background-color: #17a2b8;
-    }
+    .notification.show { transform: translateX(0); }
+    .notification.fade-out { opacity: 0; }
+    .notification.success { background-color: #28a745; }
+    .notification.error { background-color: #dc3545; }
+    .notification.info { background-color: #17a2b8; }
 `;
-
 document.head.appendChild(notificationStyles);
 
-// Initialize the app
+// Init
 function init() {
-    // Show the first notification after a short delay
     setTimeout(() => {
         showNotification('Welcome to Habit Tracker! Start by adding your first habit.', 'info');
     }, 1000);
 }
-
-// Start the app
 init();
