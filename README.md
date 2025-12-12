@@ -1,2 +1,2 @@
 # Habit Tracker
-Personalized habit tracker for day to day task
+Personalized habit tracker for day to day task.
